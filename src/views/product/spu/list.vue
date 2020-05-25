@@ -1,12 +1,12 @@
 <template>
   <div>
-    <el-card style="margin-bottom: 20px">
-      <CategorySelector @categoryChange="handleCategoryChange"></CategorySelector>
+    <el-card style="margin-bottom: 20px" v-show="!isShowSkuForm">
+      <CategorySelector ref="cs" @categoryChange="handleCategoryChange"></CategorySelector>
     </el-card>
     <el-card>
       <div v-show="!isShowSpuForm && !isShowSkuForm">
         <el-button type="primary"  icon="el-icon-plus" style="margin-bottom: 20px"
-        @click="showAddSpu">添加SPU</el-button>
+        @click="showAddSpu" :disabled="!category3Id">添加SPU</el-button>
       <el-table
         v-loading="loading"
         :data="spuList"
@@ -25,11 +25,16 @@
         </el-table-column>
         <el-table-column label="操作">
           <template slot-scope="{row, $index}">
-            <hint-button title="添加SKU" type="primary" icon="el-icon-plus" size="mini" @click="showSkuAdd"></hint-button>
+            <hint-button title="添加SKU" type="primary" icon="el-icon-plus" size="mini"
+             @click="showSkuAdd(row)"></hint-button>
             <hint-button title="修改SPU" type="primary" icon="el-icon-edit" size="mini"
-            @click="showUpdateSpu(row.id)"></hint-button>
-            <hint-button title="查看所有SKU" type="info" icon="el-icon-info" size="mini"></hint-button>
+             @click="showUpdateSpu(row.id)"></hint-button>
+            <hint-button title="查看所有SKU" type="info" icon="el-icon-info" size="mini"
+              @click="showSkuList(row)"></hint-button>
             <hint-button title="删除SPU" type="danger" icon="el-icon-delete" size="mini"></hint-button>
+             <el-popconfirm title="确定删除吗?" @onConfirm="deleteSpu(row.id)">
+                <hint-button slot="reference" title="删除SPU" type="danger" icon="el-icon-delete" size="mini"></hint-button>
+              </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -50,10 +55,25 @@
         一旦使用.sync，必须是一个动态的变量属性值，且属性名必须使用：
         但如果不加：，传递给子组件的总是false值
      -->
-     <SpuForm ref="spuForm" :visible.sync="isShowSpuForm"></SpuForm>
+     <SpuForm ref="spuForm" :visible.sync="isShowSpuForm" @saveSuccess="handleSaveSuccess"
+      @cancel="handleCancel"></SpuForm>
 
-     <SkuForm v-show="isShowSkuForm"></SkuForm>
+     <SkuForm ref="skuForm" v-show="isShowSkuForm" @cancel="isShowSkuForm=false"
+      :saveSuccess="() => isShowSkuForm=false"></SkuForm>
     </el-card>
+
+    <el-dialog title="收货地址" :visible.sync="isShowSkuList">
+      <el-table :data="skuList" border>
+        <el-table-column property="skuName" label="名称"></el-table-column>
+        <el-table-column property="price" label="价格(元)"></el-table-column>
+        <el-table-column property="weight" label="重量(KG)"></el-table-column>
+        <el-table-column label="默认图片">
+          <template slot-scope="{row}">
+            <img :src="row.skuDefaultImg" alt="" style="width: 100px;height:100px">
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -77,6 +97,10 @@ export default {
 
       isShowSpuForm: false, // 是否显示spuFrom界面
       isShowSkuForm: false, // 是否显示skuFrom界面
+
+      isShowSkuList: false, // 是否显示sku列表
+      spu: {}, // 要显示sku列表的spu
+      skuList: [], // 指定spu下所有sku的列表
     }
   },
 
@@ -90,22 +114,88 @@ export default {
   */
 
   mounted () {
-    this.category3Id = 61
-    this.getSpuList()
+    // this.category1Id = 2
+    // this.category2Id = 13
+    // this.category3Id = 61
+    // this.getSpuList()
+  },
+
+  watch: {
+    /*
+      根据 isShowSpuForm的值来更新3级列表的可操作性
+    */
+    isShowSpuForm (value) {
+      this.$refs.cs.disabled = value
+    }
   },
 
   methods: {
     /*
-      选择新的分类的监听回调
+      删除指定ID的SPU
     */
+    async deleteSpu (spuId) {
+      const result = await this.$API.spu.remove(spuId)
+      if (result.code===200) {
+        this.$message.success('删除成功')
+        this.getSpuList()
+      } else {
+        this.$message.error(result.data || result.message || '删除成功')
+      }
+    }
+    /*
+      显示指定spu下所有sku列表
+    */
+    async isShowSkuList (spu) {
+      this.isShowSkuList = true
+      this.spu = spu
+      // 异步请求获取sku列表
+      const result = await this.$API.sku.getListBySpuId(spu.id)
+      this.skuList = result.data
+    },
 
-handleSizeChange(){},
+    /*
+      spu保存成功的时间监听回调
+    */
+    handleSaveSuccess () {
+      // 重新获取分页列表
+        // 如果是添加，显示第一页，如果是更新显示当前页面
+        this.getSpuList(this.spuId ? this.page : 1)
+
+        // 重置更新的标识
+        this.spuId = null
+    },
+
+    /*
+      SPU保存操作取消的事件监听回调
+    */
+    handleCancel () {
+      // 重新更新的标识
+      this.spuId = null
+    },
+
+    /*
+      显示SKU添加的表单界面
+    */
+    showSkuAdd (spu) {
+      this.isShowSkuForm = true
+
+      spu = {...spu} // 对spu进行浅拷贝, 以免更新列表中数据对象
+      spu.category1Id = this.category1Id
+      spu.category2Id = this.category2Id
+
+      // 让skuForm去请求加载初始显示需要的数据
+      this.$refs.skuForm.initLoadAddData(spu)
+    },
+
 
    /*
       显示SKU添加的表单界面
    */
     showAddSpu () {
+      // 显示SPUForm修改界面
       this.isShowSpuForm = true
+      // 通知SpuForm请求添加界面初始数据显示
+      this.$refs.spuForm.initLoadAddData(this.category3Id)
     },
 
     /*
@@ -113,6 +203,10 @@ handleSizeChange(){},
     */
 
     showUpdateSpu (id) {
+
+      // 保存更新的标识
+      this.spuId = id
+
       // 显示SpuForm修改界面
       this.isShowSpuForm = true
 
